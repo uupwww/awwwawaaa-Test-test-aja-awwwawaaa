@@ -1,7 +1,5 @@
 local WAIT = task.wait
 local TBINSERT = table.insert
-local TBFIND = table.find
-local TBREMOVE = table.remove
 local V2 = Vector2.new
 local ROUND = math.round
 local TeamCheck = true
@@ -12,8 +10,8 @@ local Camera = workspace.CurrentCamera
 local To2D = Camera.WorldToViewportPoint
 local LocalPlayer = game.Players.LocalPlayer
 
-local Library = {};
-Library.__index = Library;
+local Library = {}
+Library.__index = Library
 
 function Library:NewLine(info)
 	local l = Drawing.new("Line")
@@ -33,14 +31,12 @@ local function IsVisibleFromCamera(targetPos, targetChar)
 	local direction = (targetPos - origin)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Blacklist
-	params.FilterDescendantsInstances = {LocalPlayer.Character}
+	params.FilterDescendantsInstances = {LocalPlayer.Character, targetChar}
 	params.IgnoreWater = true
 
 	local result = workspace:Raycast(origin, direction, params)
-	if result then
-		if not targetChar:IsAncestorOf(result.Instance) then
-			return false
-		end
+	if result and not targetChar:IsAncestorOf(result.Instance) then
+		return false
 	end
 	return true
 end
@@ -53,13 +49,14 @@ local Skeleton = {
 	Color = Color3.fromRGB(0, 255, 0),
 	Alpha = 1,
 	Thickness = 1,
-	DoSubsteps = true
+	DoSubsteps = true,
+	Connection = nil
 }
 Skeleton.__index = Skeleton
 
 function Skeleton:UpdateStructure()
-	if not self.Player.Character then return end
 	self:RemoveLines()
+	if not self.Player.Character then return end
 
 	for _, part in self.Player.Character:GetChildren() do
 		if not part:IsA("BasePart") then continue end
@@ -126,7 +123,7 @@ function Skeleton:Update()
 		return
 	end
 
-	if TeamCheck and self.Player.Team == LocalPlayer.Team then
+	if TeamCheck and self.Player.Team ~= nil and LocalPlayer.Team ~= nil and self.Player.Team == LocalPlayer.Team then
 		self:SetVisible(false)
 		return
 	end
@@ -142,21 +139,14 @@ function Skeleton:Update()
 	self:SetAlpha(self.Alpha)
 	self:SetThickness(self.Thickness)
 
-	local update = false
+	local updateNeeded = false
 	for _, l in pairs(self.Lines) do
 		local part = Character:FindFirstChild(l[3])
-		if not part then
+		local link = part and part:FindFirstChild(l[4])
+		if not (part and link and link.Part0 and link.Part1) then
 			l[1].Visible = false
 			l[2].Visible = false
-			update = true
-			continue
-		end
-
-		local link = part:FindFirstChild(l[4])
-		if not (link and link.Part0 and link.Part1) then
-			l[1].Visible = false
-			l[2].Visible = false
-			update = true
+			updateNeeded = true
 			continue
 		end
 
@@ -164,29 +154,15 @@ function Skeleton:Update()
 		local part1 = link.Part1
 
 		if self.DoSubsteps and link.C0 and link.C1 then
-			local c0 = link.C0
-			local c1 = link.C1
 			local p0, v0 = To2D(Camera, part0.Position)
-			local c0p, v1 = To2D(Camera, (part0.CFrame * c0).Position)
-
-			if v0 and v1 then
-				l[1].From = V2(p0.X, p0.Y)
-				l[1].To = V2(c0p.X, c0p.Y)
-				l[1].Visible = true
-			else
-				l[1].Visible = false
-			end
-
+			local c0p, v1 = To2D(Camera, (part0.CFrame * link.C0).Position)
 			local p1, v2 = To2D(Camera, part1.Position)
-			local c1p, v3 = To2D(Camera, (part1.CFrame * c1).Position)
+			local c1p, v3 = To2D(Camera, (part1.CFrame * link.C1).Position)
 
-			if v2 and v3 then
-				l[2].From = V2(p1.X, p1.Y)
-				l[2].To = V2(c1p.X, c1p.Y)
-				l[2].Visible = true
-			else
-				l[2].Visible = false
-			end
+			l[1].Visible = v0 and v1
+			l[2].Visible = v2 and v3
+			if v0 and v1 then l[1].From = V2(p0.X, p0.Y) l[1].To = V2(c0p.X, c0p.Y) end
+			if v2 and v3 then l[2].From = V2(p1.X, p1.Y) l[2].To = V2(c1p.X, c1p.Y) end
 		else
 			local p0, v1 = To2D(Camera, part0.Position)
 			local p1, v2 = To2D(Camera, part1.Position)
@@ -202,7 +178,7 @@ function Skeleton:Update()
 		end
 	end
 
-	if update or #self.Lines == 0 then
+	if updateNeeded or #self.Lines == 0 then
 		self:UpdateStructure()
 	end
 end
@@ -213,14 +189,18 @@ function Skeleton:Toggle()
 		self:RemoveLines()
 		self:UpdateStructure()
 
-		local c; c = RS.Heartbeat:Connect(function()
+		if self.Connection then self.Connection:Disconnect() end
+		self.Connection = RS.Heartbeat:Connect(function()
 			if not self.Visible then
 				self:SetVisible(false)
-				c:Disconnect()
+				if self.Connection then self.Connection:Disconnect() end
 				return
 			end
 			self:Update()
 		end)
+	else
+		self:SetVisible(false)
+		if self.Connection then self.Connection:Disconnect() end
 	end
 end
 
@@ -234,6 +214,7 @@ end
 
 function Skeleton:Remove()
 	self.Removed = true
+	if self.Connection then self.Connection:Disconnect() end
 	self:RemoveLines()
 end
 
